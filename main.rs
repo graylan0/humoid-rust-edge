@@ -1,43 +1,85 @@
 use iced::{
-    button, container, executor, scrollable, text_input, Align, Application, Button, Column, Command, Container, Element, Length, Scrollable, Settings, Text, TextInput, Color, Background,
+   button, container, executor, scrollable, text_input, Align, Application, Button, Column, Command, Container, Element, Length, Scrollable, Settings, Text, TextInput, Color, Background,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-// Embedding the Python NLP script as a string
+
 const PYTHON_NLP_SCRIPT: &str = r#"
 
 from llama_cpp import Llama
-import nltk
-from llama_cpp import Llama
-from nltk import pos_tag, word_tokenize
+from spacy import load
+
+nlp = load("en_core_web_sm")
 
 def determine_token(chunk):
-    words = word_tokenize(chunk)
-    tagged_words = pos_tag(words)
-    verbs = [word for word, tag in tagged_words if tag.startswith('VB')]
-    return "[action]" if verbs else "[attention]"
+   doc = nlp(chunk)
+   entities = [(ent.text, ent.label_) for ent in doc.ents]
+   verbs = [token.text for token in doc if token.pos_ == "VERB"]
+   return "[action]" if verbs else "[attention]", entities
 
 def llama_generate(prompt, max_tokens, chunk_size):
-    # Simulate chunking and tokenization
-    prompt_chunks = [prompt[i:i + chunk_size] for i in range(0, len(prompt), chunk_size)]
-    responses = []
-    for chunk in prompt_chunks:
-        token = determine_token(chunk)
-        # Simulated response for each chunk
-        responses.append(f"Chunk: {chunk}, Token: {token}")
-    return ' '.join(responses)
+   doc = nlp(prompt)
+   sentences = list(doc.sents)
+   responses = []
+   for sentence in sentences:
+       chunk = sentence.text
+       token, entities = determine_token(chunk)
+       responses.append(f"Chunk: {chunk}, Token: {token}, Entities: {entities}")
+   return ' '.join(responses)
 "#;
 
 #[pyfunction]
 fn llama_generate_rust(prompt: String, max_tokens: usize, chunk_size: usize) -> PyResult<String> {
-    Python::with_gil(|py| {
-        let py_globals = PyDict::new(py);
-        py.run(PYTHON_NLP_SCRIPT, Some(py_globals), None)?;
-        let generate_func = py_globals.get_item("llama_generate").unwrap().to_object(py);
-        let result = generate_func.call1(py, (prompt, max_tokens, chunk_size))?;
-        result.extract::<String>()
-    })
+   Python::with_gil(|py| {
+       let sqlite3 = py.import("sqlite3")?;
+       let conn = sqlite3.call_method0("connect", ("chat_history.db",))?;
+       let cursor = conn.call_method0("cursor", ())?;
+       cursor.call_method1("execute", ("SELECT message FROM chat_history ORDER BY ROWID DESC LIMIT 3",))?;
+       let past_context = cursor.call_method0("fetchall", ())?;
+       let past_context = past_context.into_iter().map(|row| row.get_item(0).extract::<String>().unwrap()).collect::<Vec<String>>().join(" ");
+
+       let py_globals = PyDict::new(py);
+       py.run(PYTHON_NLP_SCRIPT, Some(py_globals), None)?;
+       let generate_func = py_globals.get_item("llama_generate").unwrap().to_object(py);
+       let result = generate_func.call1(py, (prompt, max_tokens, chunk_size, past_context))?;
+       result.extract::<String>()
+   }).map_err(|e| {
+       println!("Error occurred while running Python script: {:?}", e);
+       e
+   })
+}
+
+fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+   match message {
+       Message::SendPressed => {
+           let response = format!("AI: {}", self.message_input_value);
+           self.response_history.push(response);
+           save_chat_history(&self.response_history).map_err(|e| {
+               println!("Error occurred while saving chat history: {:?}", e);
+               e
+           })?;
+           self.message_input_value.clear();
+       }
+       Message::InputChanged(value) => {
+           self.message_input_value = value;
+       }
+   }
+   Command::none()
+}
+
+fn save_chat_history(history: &Vec<String>) -> PyResult<()> {
+   Python::with_gil(|py| {
+       let sqlite3 = py.import("sqlite3")?;
+       let conn = sqlite3.call_method0("connect", ("chat_history.db",))?;
+       let cursor = conn.call_method0("cursor", ())?;
+       cursor.call_method1("execute", ("CREATE TABLE IF NOT EXISTS chat_history (message TEXT)",))?;
+       for message in history {
+           cursor.call_method1("execute", (format!("INSERT INTO chat_history (message) VALUES ('{}')", message),))?;
+       }
+       conn.call_method0("commit", ())?;
+       Ok(())
+   })
 }
 
 struct ChatApp {
@@ -179,10 +221,10 @@ impl scrollable::StyleSheet for DarkScrollable {
         }
     }
 
-    // Define other states as needed
+
 }
 
-// Dark-themed container styles
+
 struct DarkContainer;
 impl container::StyleSheet for DarkContainer {
     fn style(&self) -> container::Style {
@@ -195,5 +237,8 @@ impl container::StyleSheet for DarkContainer {
 }
 
 fn main() -> iced::Result {
-    ChatApp::run(Settings::default())
+   ChatApp::run(Settings::default()).map_err(|e| {
+       println!("Error occurred while running Rust application: {:?}", e);
+       e
+   })
 }
