@@ -1,0 +1,5 @@
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+rayon = "1.5.1"
+iced = "0.4"
+pyo3 = { version = "0.15", features = ["extension-module"] }
