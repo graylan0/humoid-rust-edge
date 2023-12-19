@@ -183,10 +183,10 @@ impl button::StyleSheet for DarkButton {
         }
     }
 
-    // You can also define styles for hovered, pressed, etc.
+
 }
 
-// Dark-themed text input styles
+
 struct DarkTextInput;
 impl text_input::StyleSheet for DarkTextInput {
     fn active(&self) -> text_input::Style {
@@ -199,10 +199,10 @@ impl text_input::StyleSheet for DarkTextInput {
         }
     }
 
-    // Define other states like focused, placeholder, etc.
+
 }
 
-// Dark-themed scrollable styles
+
 struct DarkScrollable;
 impl scrollable::StyleSheet for DarkScrollable {
     fn active(&self) -> scrollable::Scrollbar {
