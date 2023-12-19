@@ -30,56 +30,55 @@ def llama_generate(prompt, max_tokens, chunk_size):
 "#;
 
 #[pyfunction]
-fn llama_generate_rust(prompt: String, max_tokens: usize, chunk_size: usize) -> PyResult<String> {
-   Python::with_gil(|py| {
-       let sqlite3 = py.import("sqlite3")?;
-       let conn = sqlite3.call_method0("connect", ("chat_history.db",))?;
-       let cursor = conn.call_method0("cursor", ())?;
-       cursor.call_method1("execute", ("SELECT message FROM chat_history ORDER BY ROWID DESC LIMIT 3",))?;
-       let past_context = cursor.call_method0("fetchall", ())?;
-       let past_context = past_context.into_iter().map(|row| row.get_item(0).extract::<String>().unwrap()).collect::<Vec<String>>().join(" ");
+async fn llama_generate_rust(prompt: String, max_tokens: usize, chunk_size: usize) -> PyResult<String> {
+  Python::with_gil(|py| {
+      let sqlite3 = py.import("sqlite3")?;
+      let conn = sqlite3.call_method0("connect", ("chat_history.db",))?;
+      let cursor = conn.call_method0("cursor", ())?;
+      cursor.call_method1("execute", ("SELECT message FROM chat_history ORDER BY ROWID DESC LIMIT 3",))?;
+      let past_context = cursor.call_method0("fetchall", ())?;
+      let past_context = past_context.into_iter().map(|row| row.get_item(0).extract::<String>().unwrap()).collect::<Vec<String>>().join(" ");
 
-       let py_globals = PyDict::new(py);
-       py.run(PYTHON_NLP_SCRIPT, Some(py_globals), None)?;
-       let generate_func = py_globals.get_item("llama_generate").unwrap().to_object(py);
-       let result = generate_func.call1(py, (prompt, max_tokens, chunk_size, past_context))?;
-       result.extract::<String>()
-   }).map_err(|e| {
-       println!("Error occurred while running Python script: {:?}", e);
-       e
-   })
+      let py_globals = PyDict::new(py);
+      py.run(PYTHON_NLP_SCRIPT, Some(py_globals), None)?;
+      let generate_func = py_globals.get_item("llama_generate").unwrap().to_object(py);
+      let result = generate_func.call1(py, (prompt, max_tokens, chunk_size, past_context))?;
+      result.extract::<String>()
+  }).map_err(|e| {
+      println!("Error occurred while running Python script: {:?}", e);
+      e
+  })
 }
 
-fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-   match message {
-       Message::SendPressed => {
-           let response = format!("AI: {}", self.message_input_value);
-           self.response_history.push(response);
-           save_chat_history(&self.response_history).map_err(|e| {
-               println!("Error occurred while saving chat history: {:?}", e);
-               e
-           })?;
-           self.message_input_value.clear();
-       }
-       Message::InputChanged(value) => {
-           self.message_input_value = value;
-       }
-   }
-   Command::none()
+async fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+  match message {
+      Message::SendPressed => {
+          let response = format!("AI: {}", self.message_input_value);
+          self.response_history.push(response);
+          save_chat_history(&self.response_history).map_err(|e| {
+              println!("Error occurred while saving chat history: {:?}", e);
+              e
+          })?;
+          self.message_input_value.clear();
+      }
+      Message::InputChanged(value) => {
+          self.message_input_value = value;
+      }
+  }
+  Command::none()
 }
-
 fn save_chat_history(history: &Vec<String>) -> PyResult<()> {
-   Python::with_gil(|py| {
-       let sqlite3 = py.import("sqlite3")?;
-       let conn = sqlite3.call_method0("connect", ("chat_history.db",))?;
-       let cursor = conn.call_method0("cursor", ())?;
-       cursor.call_method1("execute", ("CREATE TABLE IF NOT EXISTS chat_history (message TEXT)",))?;
-       for message in history {
-           cursor.call_method1("execute", (format!("INSERT INTO chat_history (message) VALUES ('{}')", message),))?;
-       }
-       conn.call_method0("commit", ())?;
-       Ok(())
-   })
+  Python::with_gil(|py| {
+      let sqlite3 = py.import("sqlite3")?;
+      let conn = sqlite3.call_method0("connect", ("chat_history.db",))?;
+      let cursor = conn.call_method0("cursor", ())?;
+      cursor.call_method1("execute", ("CREATE TABLE IF NOT EXISTS chat_history (message TEXT)",))?;
+      for message in history {
+          cursor.call_method1("execute", (format!("INSERT INTO chat_history (message) VALUES ('{}')", message),))?;
+      }
+      conn.call_method0("commit", ())?;
+      Ok(())
+  })
 }
 
 struct ChatApp {
